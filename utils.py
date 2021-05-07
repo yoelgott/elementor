@@ -41,19 +41,19 @@ class SqlLiteConnection:
         return self.conn
 
 
-class VTRequests:
+class VTAssessment:
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.client = vt.Client(self.api_key)
 
-    def url_scanner(self, url: str):
-        analysis = self.client.scan_url(url, wait_for_completion=True)
+    def site_scanner(self, site: str):
+        analysis = self.client.scan_url(site, wait_for_completion=True)
         return analysis.status
 
-    def get_analysis(self, url: str):
-        url_id = vt.url_id(url)
-        url_analysis = self.client.get_object("/urls/{}", url_id)
-        return url_analysis.last_analysis_stats
+    def get_analysis(self, site: str):
+        site_id = vt.url_id(site)
+        site_analysis = self.client.get_object("/sites/{}", site_id)
+        return site_analysis.last_analysis_stats
 
     def close_client(self) -> bool:
         self.client.close()
@@ -62,13 +62,14 @@ class VTRequests:
 
 if __name__ == '__main__':
     client = vt.Client(API_KEY)
-    site = "www.wordpress.org"
-    # analysis = client.scan_url(site, wait_for_completion=True)
-    # print(analysis.status)
+    site = "stackoverflow.com"
+    analysis = client.scan_url(site, wait_for_completion=True)
+    print(analysis.status)
 
-    url_id = vt.url_id(site)
-    url = client.get_object("/urls/{}", url_id)
-    print(url.last_analysis_stats)
-    print(type(url.last_analysis_stats))
-    # analysis = client.scan_url("www.elementor.com")
+    site_id = vt.url_id(site)
+    site = client.get_object("/sites/{}", site_id)
+    print(site.last_analysis_stats)
+    print(type(site.last_analysis_stats))
     client.close()
+
+    print("hello")
