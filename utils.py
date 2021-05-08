@@ -1,6 +1,7 @@
 import pandas as pd
 import sqlite3
-import vt
+import datetime as dt
+from virus_total_apis import PublicApi as VirusTotalPublicApi
 
 from config import *
 
@@ -42,22 +43,46 @@ class SqlLiteConnection:
 
 
 class VTAssessment:
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.client = vt.Client(self.api_key)
+    def __init__(self, site, client=None, api_key=None):
+        self.site = site
 
-    def site_scanner(self, site: str):
-        analysis = self.client.scan_url(site, wait_for_completion=True)
-        return analysis.status
+        if not client and not api_key:
+            self.client = VirusTotalPublicApi(api_key)
+        elif not client:
+            raise Exception("either client object or API-KEY was not provided")
+        else:
+            self.client = client
 
-    def get_analysis(self, site: str):
-        site_id = vt.url_id(site)
-        site_analysis = self.client.get_object(f"/sites/{site_id}")
-        return site_analysis.last_analysis_stats
+        self.response = None
 
-    def close_client(self) -> bool:
-        self.client.close()
-        return True
+        self.site_risk_results = pd.Series()
+
+    def site_scanner(self, scan="1"):
+        response = self.client.get_url_report(this_url=self.site, scan=scan)
+        self.response = response
+        return response
+
+    def is_risk(self) -> bool:
+        if len(self.site_risk_results) == 0:
+            self._extract_site_risks()
+
+        risks_num = self.site_risk_results.isin(SITE_RISKS).sum()
+        return risks_num > 1
+
+    def voting_categories(self):
+        if len(self.site_risk_results) == 0:
+            self._extract_site_risks()
+        return self.site_risk_results.value_counts()
+
+    def _extract_site_risks(self):
+        scans = self.response["results"]["scans"]
+        risks = [res["result"].replace("site", "").strip() for res in scans.values()]
+        self.site_risk_results = pd.Series(risks)
+
+    def is_old_data(self) -> bool:
+        scan_time_str = self.response["results"]["scan_date"]
+        scan_time = dt.datetime.strptime(scan_time_str, "%Y-%m-%d %H:%M:%S")
+        return dt.datetime.now() - dt.timedelta(hours=0.5) > scan_time
 
 
 if __name__ == '__main__':

@@ -1,5 +1,6 @@
 import pandas as pd
 import datetime as dt
+from virus_total_apis import PublicApi as VirusTotalPublicApi
 
 from utils import SqlLiteConnection, VTAssessment
 from config import *
@@ -8,39 +9,75 @@ from config import *
 class Main:
     def __init__(self):
         self.sql_conn = SqlLiteConnection(DB_FILE_PATH)
-        self.vt_assessment = VTAssessment(API_KEY)
+        self.vt_client = VirusTotalPublicApi(API_KEY)
+
+        self.risks_df = pd.DataFrame()
+        self.votings_df = pd.DataFrame()
 
     def run(self):
+        print("Started Assessing sites at: ", dt.datetime.now())
         sites_df = self.get_sites()
-        sites_df = self.check_for_risks(sites_df)
-        self.vt_assessment.close_client()
+        self.assessing(sites_df)
+        self.handle_dfs()
+        self.load_to_db()
 
-        self.sql_conn.dump_to_db(sites_df, TABLE_NAME)
-        print("hello")
+        print("Finished Assessing sites at: ", dt.datetime.now())
 
-    def check_for_risks(self, sites_df: pd.DataFrame) -> pd.DataFrame:
-        sites_df[[TableCols.RISK.value, TableCols.ANALYSIS_TIME.value]] = sites_df[[TableCols.SITE.value]].apply(
-            self._vt_handler, axis=1, result_type="expand")
-        return sites_df
+    def load_to_db(self):
+        self.sql_conn.dump_to_db(self.risks_df, RISKS_TABLE_NAME, if_exists="replace")
+        self.sql_conn.dump_to_db(self.votings_df, VOTING_TABLE_NAME, if_exists="replace")
 
-    def _vt_handler(self, site: str):
-        print(site)
-        if self._is_old_analysis(site):
-            status = self.vt_assessment.site_scanner(site)
-            print(status)
-            analysis_time = dt.datetime.now()
-            analysis = self.vt_assessment.get_analysis(site)
-            return analysis, analysis_time
-        return None, None
+    def handle_dfs(self):
+        self.risks_df[RisksTableCols.INSERTION_TIME.value] = dt.datetime.now()
+        self.votings_df[VotingTableCols.INSERTION_TIME.value] = dt.datetime.now()
 
-    def _is_old_analysis(self, site: str) -> bool:
-        return False
+        self.risks_df = self.risks_df[[col.value for col in RisksTableCols]]
+        self.votings_df = self.votings_df[[col.value for col in VotingTableCols]]
+
+    def assessing(self, sites_df):
+        for site in sites_df[RisksTableCols.SITE.value]:
+            vt_asses = VTAssessment(site, self.vt_client)
+            response = vt_asses.site_scanner(scan="0")
+
+            # this part of code is only because i'm using the public api and i dont want to wait a whole minute for the response..
+            if response["response_code"] != 200:
+                return None
+
+            if vt_asses.is_old_data():
+                response = vt_asses.site_scanner(scan="1")
+
+                # this part of code is only because i'm using the public api and i dont want to wait a whole minute for the response..
+                if response["response_code"] != 200:
+                    return None
+
+                vt_asses = self.risks_assess(site, vt_asses)
+                vt_asses = self.voting_assess(site, vt_asses)
+
+    def risks_assess(self, site, vt_asses):
+        if vt_asses.is_risk():
+            assessment = "risk"
+        else:
+            assessment = "safe"
+        assess_data = {RisksTableCols.SITE.value: site, RisksTableCols.RISK.value: assessment}
+        risks = pd.DataFrame([assess_data])
+        self.risks_df = pd.concat([self.risks_df, risks], ignore_index=True)
+        return vt_asses
+
+    def voting_assess(self, site, vt_asses):
+        votings: pd.Series = vt_asses.voting_categories()
+        votings = votings.reset_index()
+        votings.columns = [VotingTableCols.VOTE.value, VotingTableCols.COUNT.value]
+        votings[VotingTableCols.SITE.value] = site
+        self.votings_df = pd.concat([self.votings_df, votings], ignore_index=True)
+        return vt_asses
 
     @staticmethod
     def get_sites() -> pd.DataFrame:
-        df: pd.DataFrame = pd.read_csv(CSV_SITES_URL, header=None)
-        col_name = TableCols.SITE.value
+        df: pd.DataFrame = pd.read_csv(CSV_SITES, header=None)
+        col_name = RisksTableCols.SITE.value
         df.columns = [col_name]
+        df[col_name] = df[col_name].str.strip()
+        df = df.drop_duplicates()
         return df
 
 
