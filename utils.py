@@ -52,7 +52,7 @@ class VTAssessment:
 
     def get_analysis(self, site: str):
         site_id = vt.url_id(site)
-        site_analysis = self.client.get_object("/sites/{}", site_id)
+        site_analysis = self.client.get_object(f"/sites/{site_id}")
         return site_analysis.last_analysis_stats
 
     def close_client(self) -> bool:
@@ -61,15 +61,13 @@ class VTAssessment:
 
 
 if __name__ == '__main__':
-    client = vt.Client(API_KEY)
-    site = "stackoverflow.com"
-    analysis = client.scan_url(site, wait_for_completion=True)
-    print(analysis.status)
+    conn = SqlLiteConnection(DB_FILE_PATH)
 
-    site_id = vt.url_id(site)
-    site = client.get_object("/sites/{}", site_id)
-    print(site.last_analysis_stats)
-    print(type(site.last_analysis_stats))
-    client.close()
+    query = """
+        select *
+        from sites_risk
+    """
 
-    print("hello")
+    df = conn.query_db(query)
+    conn.close_connection()
+    print(df)
