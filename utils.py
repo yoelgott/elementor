@@ -3,7 +3,7 @@ import sqlite3
 import datetime as dt
 from virus_total_apis import PublicApi as VirusTotalPublicApi
 
-from config import *
+from elementor.config import *
 
 
 class SqlLiteConnection:
